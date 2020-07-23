@@ -718,10 +718,11 @@ class SnubaTagStorage(TagStorage):
             if converted_query is not None:
                 conditions.append([snuba_key, ">=", converted_query - FUZZY_NUMERIC_DISTANCE])
                 conditions.append([snuba_key, "<=", converted_query + FUZZY_NUMERIC_DISTANCE])
-        elif has_matching_project_slugs:
-            projects = [project["id"] for project in project_queryset]
-            snuba_key = "project_id"
-            dataset = Dataset.Discover
+        elif key == PROJECT_ALIAS:
+            if has_matching_project_slugs:
+                projects = [project["id"] for project in project_queryset]
+                snuba_key = "project_id"
+                dataset = Dataset.Discover
         else:
             if snuba_key in BLACKLISTED_COLUMNS:
                 snuba_key = "tags[%s]" % (key,)
