@@ -685,6 +685,18 @@ class SnubaTagStorage(TagStorage):
 
         conditions = []
 
+        # project slugs takes priority over the project tag, so we check
+        # the project slugs first
+        if key == PROJECT_ALIAS:
+            project_filters = {
+                "id__in": projects,
+            }
+            if query:
+                project_filters["slug__icontains"] = query
+            project_queryset = Project.objects.filter(**project_filters).values("id", "slug")
+            project_slugs = {project["id"]: project["slug"] for project in project_queryset}
+            has_matching_project_slugs = project_queryset.exists()
+
         # transaction status needs a special case so that the user interacts with the names and not codes
         transaction_status = snuba_key == "transaction_status"
         if transaction_status:
@@ -706,18 +718,10 @@ class SnubaTagStorage(TagStorage):
             if converted_query is not None:
                 conditions.append([snuba_key, ">=", converted_query - FUZZY_NUMERIC_DISTANCE])
                 conditions.append([snuba_key, "<=", converted_query + FUZZY_NUMERIC_DISTANCE])
-        elif key == PROJECT_ALIAS:
-            project_filters = {
-                "id__in": projects,
-            }
-            if query:
-                project_filters["slug__icontains"] = query
-            project_queryset = Project.objects.filter(**project_filters).values("id", "slug")
-            project_slugs = {project["id"]: project["slug"] for project in project_queryset}
-            if project_queryset.exists():
-                projects = [project["id"] for project in project_queryset]
-                snuba_key = "project_id"
-                dataset = Dataset.Discover
+        elif has_matching_project_slugs:
+            projects = [project["id"] for project in project_queryset]
+            snuba_key = "project_id"
+            dataset = Dataset.Discover
         else:
             if snuba_key in BLACKLISTED_COLUMNS:
                 snuba_key = "tags[%s]" % (key,)
@@ -760,9 +764,10 @@ class SnubaTagStorage(TagStorage):
             )
         # With project names we map the ids back to the project slugs
         elif key == PROJECT_ALIAS:
-            results = OrderedDict(
-                [(project_slugs[value], data) for value, data in six.iteritems(results)]
-            )
+            if has_matching_project_slugs:
+                results = OrderedDict(
+                    [(project_slugs[value], data) for value, data in six.iteritems(results)]
+                )
 
         tag_values = [
             TagValue(key=key, value=six.text_type(value), **fix_tag_value_data(data))
